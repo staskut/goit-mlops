@@ -1,0 +1,32 @@
+# ===== STAGE 1: Install dependencies in isolation =====
+FROM python:3.11-slim as builder
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies needed for some Python packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libglib2.0-0 libsm6 libxrender1 libxext6 \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Copy only requirements first to leverage Docker cache
+COPY app/requirements.txt .
+
+# Install Python packages to a temporary folder
+RUN pip install --no-cache-dir --target=/python-deps -r requirements.txt
+
+# ===== STAGE 2: Final runtime image =====
+FROM python:3.11-slim
+
+# Set working directory
+WORKDIR /app
+
+# Copy only necessary dependencies from the builder stage
+COPY --from=builder /python-deps /usr/local/lib/python3.11/site-packages/
+
+# Copy application code and the model
+COPY app/ /app/
+COPY model/ /model/
+
+# Default command
+ENTRYPOINT ["python", "inference.py"]
