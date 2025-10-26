@@ -2,3 +2,7 @@
 logs/
 *.pt
 data/dog.jpeg
+.terraform.lock.hcl
+.terraform/
+terraform.tfstate
+terraform.tfstate.backup
