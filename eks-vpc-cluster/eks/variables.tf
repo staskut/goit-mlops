@@ -1,14 +1,17 @@
 variable "cluster_name" {
-  default = "goit"
+  type        = string
+  default     = "goit-cluster"
+  description = "EKS cluster name"
 }
-
 
 variable "cluster_version" {
-  default = "1.31"
+  type        = string
+  default     = "1.31"
+  description = "EKS cluster version"
 }
 
-
 variable "aws_region" {
+  type        = string
   default     = "eu-west-2"
-  description = "Default Region"
+  description = "AWS region"
 }

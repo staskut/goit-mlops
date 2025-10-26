@@ -1,140 +1,147 @@
-# ML Inference Service — Dockerized
+# Інструкція з розгортання інфраструктури AWS EKS + VPC
 
-Цей проєкт демонструє контейнеризацію ML-моделі (TorchScript MobileNetV2) у двох варіантах Docker-образів:
+## Опис
 
-* **Fat (python:3.11)** — важкий базовий образ із повним середовищем.
-* **Optimized (python:3.13-slim)** — полегшений multi-stage образ.
+Цей проєкт автоматизує створення інфраструктури AWS за допомогою Terraform.
+Він створює:
 
----
-
-## 1. Підготовка середовища
-
-Переконайтесь, що Docker встановлено:
-
-```bash
-docker --version
-docker compose version
-```
-
-Якщо Docker відсутній — запустіть:
-
-```bash
-chmod +x install_dev_tools.sh
-./install_dev_tools.sh
-```
+* **VPC** із публічними та приватними підмережами (через офіційний модуль `terraform-aws-modules/vpc/aws`)
+* **EKS кластер** із двома керованими групами вузлів (CPU та GPU)
+* **CloudWatch логування** та базові теги для моніторингу та управління
 
 ---
 
-## 2. Збірка образів
-
-### Fat образ:
-
-```bash
-docker build -t pytorch-infer-fat -f Dockerfile.fat .
-```
-
-### Optimized образ:
-
-```bash
-docker build -t pytorch-infer-optimized -f Dockerfile.slim .
-```
-
-Перевірка створених образів:
-
-```bash
-docker images
-```
-
-Очікувано:
+## Структура проєкту
 
 ```
-REPOSITORY               TAG       IMAGE ID       CREATED         SIZE
-pytorch-infer-fat        latest    a1b2c3d4e5f6   3 minutes ago   1.81GB
-pytorch-infer-optimized  latest    9f8e7d6c5b4a   2 minutes ago   840MB
+eks-vpc-cluster/
+├── backend.tf
+├── main.tf
+├── variables.tf
+├── outputs.tf
+├── terraform.tf
+├── vpc/
+│   ├── backend.tf
+│   ├── main.tf
+│   ├── variables.tf
+│   ├── outputs.tf
+│   └── terraform.tf
+└── eks/
+    ├── backend.tf
+    ├── main.tf
+    ├── variables.tf
+    ├── outputs.tf
+    └── terraform.tf
 ```
 
 ---
 
-## 3. Запуск контейнера для inference
+## ⚙️ Передумови
 
-Приклад запуску з локальним зображенням `data/dog.jpeg`:
+1. Встановити Terraform
 
-```bash
-docker run --rm -v $(pwd)/data:/data pytorch-infer-optimized /data/dog.jpeg
-```
+2. Встановити AWS CLI
 
-або для fat-образу:
+3. Налаштувати AWS облікові дані:
 
-```bash
-docker run --rm -v $(pwd)/data:/data pytorch-infer-fat /data/dog.jpeg
-```
+   ```bash
+   aws configure
+   ```
 
-Очікуваний результат (топ-3 класи):
+   або використати профіль з `~/.aws/credentials`
 
-```
-Labrador retriever: 0.82
-golden retriever: 0.10
-flat-coated retriever: 0.05
-```
+4. Переконатися, що існує S3-бакет для зберігання `terraform.tfstate`, наприклад:
 
----
+   ```bash
+   aws s3api create-bucket \
+     --bucket mlops-tfstate-stankutnyk \
+     --region eu-west-2 \
+     --create-bucket-configuration LocationConstraint=eu-west-2
 
-## 4. Перевірка кількості шарів
-
-Переглянути історію шарів:
-
-```bash
-docker history pytorch-infer-optimized
-```
-
-Порахувати кількість шарів:
-
-```bash
-docker history --no-trunc --format "{{.ID}}" pytorch-infer-optimized | wc -l
-docker history --no-trunc --format "{{.ID}}" pytorch-infer-fat | wc -l
-```
-
-Альтернативно, використати `inspect`:
-
-```bash
-docker inspect pytorch-infer-optimized --format='{{json .RootFS.Layers}}' | jq length
-```
+   aws s3api put-bucket-versioning \
+     --bucket mlops-tfstate-stankutnyk \
+     --versioning-configuration Status=Enabled
+   ```
 
 ---
 
-## 5. Перевірка Torch та Python у контейнері
+## Команди для запуску інфраструктури
 
-Запустити інтерактивну консоль:
-
-```bash
-docker run -it pytorch-infer-optimized bash
-```
-
-Перевірити:
+### Ініціалізація Terraform
 
 ```bash
-python -c "import torch; print(torch.__version__)"
+terraform init -reconfigure
 ```
 
-Вийти з контейнера:
-
-```bash
-exit
-```
+> Виконує ініціалізацію бекенду, завантажує модулі та провайдери.
 
 ---
 
-## 6. Очистка непотрібних ресурсів
-
-Після тестів можна видалити образи:
-
-```bash
-docker image rm pytorch-infer-fat pytorch-infer-optimized
-```
 
 ---
 
-**Підсумок:**
+### Попередній перегляд плану змін
 
-* Fat образ (~1.81GB, 21 шар) — для тестів.
-* Optimized образ (~840MB, 16 шарів) — для продакшн середовища.
+```bash
+terraform plan
+```
+
+> Показує, які ресурси будуть створені, змінені або видалені.
+
+---
+
+### Створення інфраструктури
+
+```bash
+terraform apply
+```
+
+> Підтвердіть виконання командою `yes`. Після завершення буде створено VPC і EKS кластер із двома групами вузлів.
+
+---
+
+### Підключення до кластера Kubernetes
+
+```bash
+aws eks --region eu-west-2 update-kubeconfig --name goit-cluster
+```
+
+Перевірка стану вузлів:
+
+```bash
+kubectl get nodes
+```
+
+> Ви повинні побачити дві групи вузлів: `cpu-nodes` і `gpu-nodes`.
+
+---
+
+### Видалення інфраструктури
+
+```bash
+terraform destroy
+```
+
+> Знищує усі створені ресурси AWS (крім S3-бакету для стану).
+
+---
+
+## Перевірка після розгортання
+
+1. Переконайтеся, що кластер доступний:
+
+   ```bash
+   kubectl cluster-info
+   ```
+2. Перевірте CloudWatch Logs:
+
+   ```bash
+   aws logs describe-log-groups --region eu-west-2
+   ```
+3. Переконайтеся, що дві групи вузлів працюють:
+
+   ```bash
+   kubectl get nodes -o wide
+   ```
+
+---
