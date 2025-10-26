@@ -109,11 +109,19 @@ aws eks --region eu-west-2 update-kubeconfig --name goit-cluster
 Перевірка стану вузлів:
 
 ```bash
-kubectl get nodes
+aws eks list-nodegroups --cluster-name goit-cluster --region eu-west-2
 ```
 
 > Ви повинні побачити дві групи вузлів: `cpu-nodes` і `gpu-nodes`.
+![img_1.png](img_1.png)
 
+![img.png](img.png)
+
+В kubectl по дефолту буде видно тільки CPU групу, якщо GPU група не заскейлена.
+```bash
+kubectl get nodes -L eks.amazonaws.com/nodegroup
+````
+![img_2.png](img_2.png)
 ---
 
 ### Видалення інфраструктури
@@ -123,25 +131,5 @@ terraform destroy
 ```
 
 > Знищує усі створені ресурси AWS (крім S3-бакету для стану).
-
----
-
-## Перевірка після розгортання
-
-1. Переконайтеся, що кластер доступний:
-
-   ```bash
-   kubectl cluster-info
-   ```
-2. Перевірте CloudWatch Logs:
-
-   ```bash
-   aws logs describe-log-groups --region eu-west-2
-   ```
-3. Переконайтеся, що дві групи вузлів працюють:
-
-   ```bash
-   kubectl get nodes -o wide
-   ```
 
 ---
