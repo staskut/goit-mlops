@@ -1,135 +1,166 @@
-# Інструкція з розгортання інфраструктури AWS EKS + VPC
+# ArgoCD Deployment on EKS
 
-## Опис
+## 1. Deploy ArgoCD via Terraform
 
-Цей проєкт автоматизує створення інфраструктури AWS за допомогою Terraform.
-Він створює:
-
-* **VPC** із публічними та приватними підмережами (через офіційний модуль `terraform-aws-modules/vpc/aws`)
-* **EKS кластер** із двома керованими групами вузлів (CPU та GPU)
-* **CloudWatch логування** та базові теги для моніторингу та управління
-
----
-
-## Структура проєкту
-
-```
-eks-vpc-cluster/
-├── backend.tf
-├── main.tf
-├── variables.tf
-├── outputs.tf
-├── terraform.tf
-├── vpc/
-│   ├── backend.tf
-│   ├── main.tf
-│   ├── variables.tf
-│   ├── outputs.tf
-│   └── terraform.tf
-└── eks/
-    ├── backend.tf
-    ├── main.tf
-    ├── variables.tf
-    ├── outputs.tf
-    └── terraform.tf
-```
-
----
-
-## ⚙️ Передумови
-
-1. Встановити Terraform
-
-2. Встановити AWS CLI
-
-3. Налаштувати AWS облікові дані:
-
-   ```bash
-   aws configure
-   ```
-
-   або використати профіль з `~/.aws/credentials`
-
-4. Переконатися, що існує S3-бакет для зберігання `terraform.tfstate`, наприклад:
-
-   ```bash
-   aws s3api create-bucket \
-     --bucket mlops-tfstate-stankutnyk \
-     --region eu-west-2 \
-     --create-bucket-configuration LocationConstraint=eu-west-2
-
-   aws s3api put-bucket-versioning \
-     --bucket mlops-tfstate-stankutnyk \
-     --versioning-configuration Status=Enabled
-   ```
-
----
-
-## Команди для запуску інфраструктури
-
-### Ініціалізація Terraform
+### Steps
 
 ```bash
-terraform init -reconfigure
-```
-
-> Виконує ініціалізацію бекенду, завантажує модулі та провайдери.
-
----
-
-
----
-
-### Попередній перегляд плану змін
-
-```bash
-terraform plan
-```
-
-> Показує, які ресурси будуть створені, змінені або видалені.
-
----
-
-### Створення інфраструктури
-
-```bash
+cd terraform/argocd
+terraform init
 terraform apply
 ```
 
-> Підтвердіть виконання командою `yes`. Після завершення буде створено VPC і EKS кластер із двома групами вузлів.
+After the apply completes, verify the pods:
+
+```bash
+kubectl get pods -n infra-tools
+```
+
+Expected output:
+
+```
+NAME                                         READY   STATUS    RESTARTS   AGE
+argocd-application-controller-xxxxxx         1/1     Running   0          2m
+argocd-repo-server-xxxxxx                   1/1     Running   0          2m
+argocd-server-xxxxxx                        1/1     Running   0          2m
+```
+![img.png](img.png)
+---
+
+## 2. Access ArgoCD UI
+
+### Port-forward to the UI:
+
+```bash
+kubectl port-forward svc/argocd-server -n infra-tools 8080:443
+```
+
+Open in your browser: [https://localhost:8080](https://localhost:8080)
+
+![img_1.png](img_1.png)
+
+### Retrieve admin password:
+
+```bash
+kubectl -n infra-tools get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 --decode
+```
+
+Login with:
+
+* **Username:** `admin`
+* **Password:** (from above command)
 
 ---
 
-### Підключення до кластера Kubernetes
+## 3. Connect Git Repository to ArgoCD
+
+### Add repository from CLI (optional)
 
 ```bash
-aws eks --region eu-west-2 update-kubeconfig --name goit-cluster
+argocd login localhost:8080 --username admin --password <password> --insecure
+argocd repo add https://github.com/<your-username>/goit-argo.git --name goit-argo
 ```
 
-Перевірка стану вузлів:
+Or, add it through the **ArgoCD UI** under *Settings → Repositories*.
 
-```bash
-aws eks list-nodegroups --cluster-name goit-cluster --region eu-west-2
+
+---
+
+## 4. Deploy NGINX Application
+
+### Application manifest (`goit-argo/applications/nginx-app.yaml`):
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: nginx
+  namespace: infra-tools
+spec:
+  project: default
+  source:
+    repoURL: https://charts.bitnami.com/bitnami
+    chart: nginx
+    targetRevision: 15.10.0
+    helm:
+      values: |
+        image:
+          tag: latest
+          pullPolicy: Always
+        service:
+          type: ClusterIP
+        replicaCount: 1
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: nginx
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
 ```
 
-> Ви повинні побачити дві групи вузлів: `cpu-nodes` і `gpu-nodes`.
-![img_1.png](img_1.png)
+Commit and push to the Git repository:
 
-![img.png](img.png)
-
-В kubectl по дефолту буде видно тільки CPU групу, якщо GPU група не заскейлена.
 ```bash
-kubectl get nodes -L eks.amazonaws.com/nodegroup
-````
+git add applications/nginx-app.yaml
+git commit -m "Add NGINX Application"
+git push
+```
+
+Apply in the cluster:
+
+```bash
+kubectl apply -f https://raw.githubusercontent.com/<your-username>/goit-argo/main/applications/nginx-app.yaml -n infra-tools
+```
+
+ArgoCD will detect the Application and start syncing automatically.
+
+Check status:
+
+```bash
+kubectl get applications -n infra-tools
+```
+
+Expected:
+
+```
+NAME      SYNC STATUS   HEALTH STATUS
+nginx     Synced        Healthy
+```
 ![img_2.png](img_2.png)
 ---
 
-### Видалення інфраструктури
+## 5. Verify NGINX Deployment
+
+Check the deployed resources:
 
 ```bash
-terraform destroy
+kubectl get pods -n nginx
+kubectl get svc -n nginx
 ```
 
-> Знищує усі створені ресурси AWS (крім S3-бакету для стану).
+Expected output:
 
+```
+NAME                     READY   STATUS    RESTARTS   AGE
+nginx-xxxxxxx-xxxxx      1/1     Running   0          1m
+
+NAME       TYPE        CLUSTER-IP       PORT(S)
+nginx      ClusterIP   10.xxx.xxx.xxx   80/TCP
+```
+![img_3.png](img_3.png)
+---
+
+## 6. Access NGINX via Port-Forward
+
+```bash
+kubectl port-forward svc/nginx -n nginx 8081:80
+```
+
+Then open [http://localhost:8081](http://localhost:8081)
+
+Expected result: **Default NGINX Welcome Page** 🟢
+![img_4.png](img_4.png)
 ---

@@ -4,5 +4,6 @@ data "terraform_remote_state" "vpc" {
     bucket = "mlops-tfstate-stankutnyk"
     key    = "vpc/terraform.tfstate"
     region = "eu-west-2"
+    profile = "personal"
   }
 }
