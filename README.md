@@ -1,166 +1,123 @@
-# ArgoCD Deployment on EKS
+# README.md
 
-## 1. Deploy ArgoCD via Terraform
+## Port-forward для доступу до UI
 
-### Steps
-
-```bash
-cd terraform/argocd
-terraform init
-terraform apply
-```
-
-After the apply completes, verify the pods:
+### MLflow UI
 
 ```bash
-kubectl get pods -n infra-tools
+kubectl port-forward svc/mlflow -n mlflow 5000:80
 ```
 
-Expected output:
+Відкрити у браузері:
+[http://localhost:5000](http://localhost:5000)
 
-```
-NAME                                         READY   STATUS    RESTARTS   AGE
-argocd-application-controller-xxxxxx         1/1     Running   0          2m
-argocd-repo-server-xxxxxx                   1/1     Running   0          2m
-argocd-server-xxxxxx                        1/1     Running   0          2m
-```
-![img.png](img.png)
----
-
-## 2. Access ArgoCD UI
-
-### Port-forward to the UI:
+### MinIO Console
 
 ```bash
-kubectl port-forward svc/argocd-server -n infra-tools 8080:443
+kubectl port-forward svc/minio-console -n mlflow 9001:9001
 ```
 
-Open in your browser: [https://localhost:8080](https://localhost:8080)
+Відкрити у браузері:
+[http://localhost:9001](http://localhost:9001)
 
-![img_1.png](img_1.png)
-
-### Retrieve admin password:
+### Prometheus PushGateway
 
 ```bash
-kubectl -n infra-tools get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 --decode
+kubectl port-forward svc/pushgateway-prometheus-pushgateway -n monitoring 9091:9091
 ```
 
-Login with:
+Відкрити у браузері:
+[http://localhost:9091](http://localhost:9091)
 
-* **Username:** `admin`
-* **Password:** (from above command)
+### Prometheus Server
+
+```bash
+kubectl port-forward svc/prometheus-server -n monitoring 9090:80
+```
+
+Відкрити у браузері:
+[http://localhost:9090](http://localhost:9090)
+
+### Grafana
+
+```bash
+kubectl port-forward svc/grafana -n monitoring 3000:80
+```
+
+Відкрити у браузері:
+[http://localhost:3000](http://localhost:3000)
 
 ---
 
-## 3. Connect Git Repository to ArgoCD
+## Запуск скрипта `train_and_push.py`
 
-### Add repository from CLI (optional)
+1. Переконайтеся, що MLflow, MinIO, PostgreSQL та Prometheus PushGateway розгорнуті у кластері Kubernetes через ArgoCD.
+2. Встановіть необхідні змінні середовища:
 
-```bash
-argocd login localhost:8080 --username admin --password <password> --insecure
-argocd repo add https://github.com/<your-username>/goit-argo.git --name goit-argo
-```
+   ```bash
+   export MLFLOW_TRACKING_URI=http://localhost:5000
+   export MLFLOW_S3_ENDPOINT_URL=http://localhost:9000
+   export AWS_ACCESS_KEY_ID=admin
+   export AWS_SECRET_ACCESS_KEY=minio123
+   export PUSHGATEWAY_URL=http://localhost:9091
+   ```
+3. Запустіть скрипт:
 
-Or, add it through the **ArgoCD UI** under *Settings → Repositories*.
-
+   ```bash
+   python mlflow-experiments/train_and_push.py
+   ```
+4. Скрипт завантажує датасет **Iris**, тренує кілька моделей із різними параметрами, логує метрики в **MLflow**, зберігає артефакти в **MinIO**, та пушить фінальні метрики (`accuracy`, `loss`) у **Prometheus PushGateway**.
 
 ---
 
-## 4. Deploy NGINX Application
+## Перевірка наявності сервісів у кластері
 
-### Application manifest (`goit-argo/applications/nginx-app.yaml`):
-
-```yaml
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: nginx
-  namespace: infra-tools
-spec:
-  project: default
-  source:
-    repoURL: https://charts.bitnami.com/bitnami
-    chart: nginx
-    targetRevision: 15.10.0
-    helm:
-      values: |
-        image:
-          tag: latest
-          pullPolicy: Always
-        service:
-          type: ClusterIP
-        replicaCount: 1
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: nginx
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
-    syncOptions:
-      - CreateNamespace=true
-```
-
-Commit and push to the Git repository:
+Перевірте, що всі необхідні поди запущені:
 
 ```bash
-git add applications/nginx-app.yaml
-git commit -m "Add NGINX Application"
-git push
+kubectl get pods -n mlflow
+kubectl get pods -n monitoring
 ```
 
-Apply in the cluster:
+Очікувані сервіси:
 
-```bash
-kubectl apply -f https://raw.githubusercontent.com/<your-username>/goit-argo/main/applications/nginx-app.yaml -n infra-tools
-```
-
-ArgoCD will detect the Application and start syncing automatically.
-
-Check status:
-
-```bash
-kubectl get applications -n infra-tools
-```
-
-Expected:
-
-```
-NAME      SYNC STATUS   HEALTH STATUS
-nginx     Synced        Healthy
-```
-![img_2.png](img_2.png)
----
-
-## 5. Verify NGINX Deployment
-
-Check the deployed resources:
-
-```bash
-kubectl get pods -n nginx
-kubectl get svc -n nginx
-```
-
-Expected output:
-
-```
-NAME                     READY   STATUS    RESTARTS   AGE
-nginx-xxxxxxx-xxxxx      1/1     Running   0          1m
-
-NAME       TYPE        CLUSTER-IP       PORT(S)
-nginx      ClusterIP   10.xxx.xxx.xxx   80/TCP
-```
-![img_3.png](img_3.png)
----
-
-## 6. Access NGINX via Port-Forward
-
-```bash
-kubectl port-forward svc/nginx -n nginx 8081:80
-```
-
-Then open [http://localhost:8081](http://localhost:8081)
-
-Expected result: **Default NGINX Welcome Page** 🟢
+* `mlflow` — MLflow Tracking Server
+![img_6.png](img_6.png)
+* `minio` — зберігання артефактів
+* `postgres-postgresql` — база даних для MLflow
+* `pushgateway-prometheus-pushgateway` — PushGateway
 ![img_4.png](img_4.png)
+* `prometheus-server` — Prometheus Server
+![img_3.png](img_3.png)
+* `grafana` — Grafana UI
+![img_5.png](img_5.png)
+
+![img_7.png](img_7.png)
+---
+
+## Перегляд метрик у Grafana
+
+1. Увійдіть у Grafana: [http://localhost:3000](http://localhost:3000)
+2. Додайте джерело даних **Prometheus**:
+
+   * URL: `http://prometheus-server.monitoring.svc.cluster.local`
+   * Натисніть **Save & Test**.
+3. Перейдіть у **Explore → Prometheus**.
+4. Введіть запити:
+
+   ```promql
+   mlflow_accuracy
+   mlflow_loss
+   ```
+5. Ви побачите метрики, передані скриптом `train_and_push.py` через PushGateway.
+
+---
+
+## Скриншоти
+
+* **MLflow UI** – [Посилання або вставлене зображення]
+![img_1.png](img_1.png)
+* **Grafana Explore (mlflow_accuracy, mlflow_loss)** – [Посилання або вставлене зображення]
+![img.png](img.png)
+* ![img_2.png](img_2.png)
 ---
