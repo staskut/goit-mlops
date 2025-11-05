@@ -1,8 +1,2 @@
-*.log
-logs/
-*.pt
-data/dog.jpeg
-.terraform.lock.hcl
+*lock.hcl
 .terraform/
-terraform.tfstate
-terraform.tfstate.backup
