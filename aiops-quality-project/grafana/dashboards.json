@@ -1,0 +1,64 @@
+{
+  "__inputs": [],
+  "__requires": [],
+  "annotations": { "list": [] },
+  "editable": true,
+  "gnetId": null,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "id": 2,
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total{app_name=\"aiops-quality-project\"}[1m]))",
+          "legendFormat": "Requests per Second",
+          "refId": "A"
+        }
+      ],
+      "title": "QPS (Requests per Second)",
+      "type": "graph"
+    },
+    {
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "id": 4,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(http_requests_latency_seconds_bucket{app_name=\"aiops-quality-project\"}[5m])) by (le))",
+          "legendFormat": "p95 Latency (seconds)",
+          "refId": "A"
+        }
+      ],
+      "title": "p95 Latency",
+      "type": "graph"
+    },
+    {
+      "datasource": "Loki",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
+      "id": 6,
+      "targets": [
+        {
+          "expr": "count_over_time({app=\"mlops-app\"} |= \"Drift detected\" [1m])",
+          "refId": "A"
+        }
+      ],
+      "title": "Drift Alerts (per minute)",
+      "type": "graph"
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 36,
+  "style": "dark",
+  "tags": [],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "",
+  "title": "AIOps Quality Project Dashboard",
+  "uid": "aiops_dashboard",
+  "version": 1
+}

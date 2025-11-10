@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+scikit-learn
+pandas
+alibi-detect[tensorflow]
+prometheus-fastapi-instrumentator
+requests
+python-json-logger

@@ -1,0 +1,36 @@
+# Це конфігурація для Prometheus, не для Kubernetes
+- job_name: 'kubernetes-pods-annotated'
+
+  # Використовуємо Kubernetes SD (Service Discovery) для пошуку цілей
+  kubernetes_sd_configs:
+    - role: pod
+
+  # Секція relabeling - це те, де відбувається магія
+  relabel_configs:
+    # 1. Шукаємо поди з анотацією 'prometheus.io/scrape: "true"'
+    - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+      action: keep
+      regex: true
+
+    # 2. (Опціонально) Беремо шлях з анотації, якщо він є, інакше /metrics
+    - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+      action: replace
+      target_label: __metrics_path__
+      regex: (.+)
+
+    # 3. Беремо порт з анотації
+    - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+      action: replace
+      target_label: __address__
+      regex: ([^:]+)(?::\d+)?;(\d+)
+      replacement: $1:$2
+
+    # 4. Встановлюємо неймспейс поду як лейбл
+    - source_labels: [__meta_kubernetes_namespace]
+      action: replace
+      target_label: kubernetes_namespace
+
+    # 5. Встановлюємо ім'я поду як лейбл
+    - source_labels: [__meta_kubernetes_pod_name]
+      action: replace
+      target_label: kubernetes_pod_name

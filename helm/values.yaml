@@ -1,0 +1,37 @@
+replicaCount: 1
+
+image:
+  # URL репозиторію ECR буде вставлено GitHub Actions
+  repository: your-ecr-repo-url
+  pullPolicy: IfNotPresent
+  # Тег буде оновлено автоматично GitHub Actions
+  tag: "latest"
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+service:
+  type: ClusterIP
+  port: 80
+
+# Змінні оточення для нашого FastAPI сервісу
+env:
+  # GITHUB_WEBHOOK_URL: "https://api.github.com/repos/YOUR_USERNAME/YOUR_REPO/dispatches"
+  GITHUB_WEBHOOK_URL: "REPO_WEBHOOK_URL"
+  # GITHUB_TOKEN: "токен з репозиторію"
+  GITHUB_TOKEN: "GH_PAT"
+
+# Анотації для Prometheus, щоб він знав, що треба скрейпити цей под
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8000"  # Порт, на якому FastAPI віддає метрики
+  prometheus.io/path: "/metrics"
+
+resources: {}
+  # limits:
+  #   cpu: 100m
+  #   memory: 128Mi
+  # requests:
+  #   cpu: 100m
+  #   memory: 128Mi
