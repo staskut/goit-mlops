@@ -1,0 +1,12 @@
+name: 'Test Workflow'
+
+# Тригер для ручного запуску
+on:
+  workflow_dispatch:
+
+jobs:
+  test_job:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 'Say Hello'
+        run: echo "Hello, GitHub Actions! This test workflow is visible."
