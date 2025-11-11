@@ -8,6 +8,7 @@ on:
 env:
   AWS_REGION: "eu-west-2" # <-- ЗАМІНІТЬ НА ВАШ РЕГІОН
   ECR_REPOSITORY: "865683084473.dkr.ecr.eu-west-2.amazonaws.com/goit-mlops-repo" # <-- ЗАМІНІТЬ НА НАЗВУ ВАШОГО ECR РЕПО
+  PROJECT_DIR: "aiops-quality-project"
 
 permissions:
   contents: write
@@ -38,10 +39,10 @@ jobs:
           python-version: '3.10'
 
       - name: Install Training Dependencies
-        run: pip install -r model/requirements.txt
+        run: pip install -r $PROJECT_DIR/model/requirements.txt
 
       - name: Run Retraining Script
-        run: python model/train.py
+        run: python $PROJECT_DIR/model/train.py
 
       - name: Generate Image Tag
         id: image_tag

@@ -27,7 +27,7 @@ print("Drift detector trained.")
 
 # 4. Збереження артефактів у папку 'app/'
 # Це важливо, оскільки app/Dockerfile буде копіювати вміст папки 'app/'
-output_dir = "app"
+output_dir = "aiops-quality-project/app"
 os.makedirs(output_dir, exist_ok=True)
 
 joblib.dump(model, os.path.join(output_dir, "model.pkl"))
