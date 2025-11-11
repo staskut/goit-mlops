@@ -5,7 +5,7 @@ image:
   repository: 865683084473.dkr.ecr.eu-west-2.amazonaws.com/goit-mlops-repo
   pullPolicy: IfNotPresent
   # Тег буде оновлено автоматично GitHub Actions
-  tag: "latest"
+  tag: "0.1.0"
 
 imagePullSecrets: []
 nameOverride: ""
