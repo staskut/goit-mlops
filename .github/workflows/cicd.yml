@@ -1,4 +1,4 @@
-name: MLOps CI/CD - Retrain and Deploy
+name: ML Ops CI/CD - Retrain and Deploy
 
 on:
   # 1. Ручний запуск з інтерфейсу GitHub

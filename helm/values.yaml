@@ -2,7 +2,7 @@ replicaCount: 1
 
 image:
   # URL репозиторію ECR буде вставлено GitHub Actions
-  repository: your-ecr-repo-url
+  repository: 865683084473.dkr.ecr.eu-west-2.amazonaws.com/goit-mlops-repo
   pullPolicy: IfNotPresent
   # Тег буде оновлено автоматично GitHub Actions
   tag: "latest"
