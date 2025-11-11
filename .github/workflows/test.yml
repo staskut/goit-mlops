@@ -10,3 +10,4 @@ jobs:
     steps:
       - name: 'Say Hello'
         run: echo "Hello, GitHub Actions! This test workflow is visible."
+        
