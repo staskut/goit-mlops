@@ -1,0 +1,51 @@
+image:
+  repository: 865683084473.dkr.ecr.eu-west-2.amazonaws.com/goit-mlops-repo
+  tag: v0.1.0
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+  name: application
+
+env:
+  MLFLOW_TRACKING_URI: http://mlflow.application.svc.cluster.local:5000
+  MODEL_NAME: iris_rf_model
+  MODEL_STAGE: Production
+  DRIFT_ENABLED: "true"
+
+envFromSecret: mlflow-secrets # містить AWS_ACCESS_KEY_ID/SECRET + MLFLOW_S3_ENDPOINT_URL тощо
+
+resources:
+  requests:
+    cpu: 200m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 8080
+  initialDelaySeconds: 10
+  periodSeconds: 15
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: 8080
+  initialDelaySeconds: 5
+  periodSeconds: 10
+
+podAnnotations: {}
+podLabels:
+  app: application
+
+metrics:
+  enabled: true
+  path: /metrics
+  port: 8080

@@ -1,4 +1,0 @@
-scikit-learn
-pandas
-alibi-detect[tensorflow]
-numpy

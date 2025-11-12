@@ -1,64 +1,52 @@
 {
-  "__inputs": [],
-  "__requires": [],
-  "annotations": { "list": [] },
-  "editable": true,
-  "gnetId": null,
-  "graphTooltip": 0,
-  "id": null,
-  "links": [],
+  "title": "Inference Service Overview",
+  "timezone": "browser",
   "panels": [
     {
-      "datasource": "Prometheus",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
-      "id": 2,
+      "type": "stat",
+      "title": "Requests / min",
       "targets": [
         {
-          "expr": "sum(rate(http_requests_total{app_name=\"aiops-quality-project\"}[1m]))",
-          "legendFormat": "Requests per Second",
-          "refId": "A"
+          "expr": "sum(rate(inference_requests_total{endpoint=\"/predict\"}[1m]))",
+          "legendFormat": "req/min"
         }
       ],
-      "title": "QPS (Requests per Second)",
-      "type": "graph"
+      "id": 1
     },
     {
-      "datasource": "Prometheus",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
-      "id": 4,
+      "type": "graph",
+      "title": "Latency p95",
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(http_requests_latency_seconds_bucket{app_name=\"aiops-quality-project\"}[5m])) by (le))",
-          "legendFormat": "p95 Latency (seconds)",
-          "refId": "A"
+          "expr": "histogram_quantile(0.95, sum(rate(inference_latency_seconds_bucket{endpoint=\"/predict\"}[5m])) by (le))",
+          "legendFormat": "p95"
         }
       ],
-      "title": "p95 Latency",
-      "type": "graph"
+      "id": 2
     },
     {
-      "datasource": "Loki",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
-      "id": 6,
+      "type": "stat",
+      "title": "Errors / min",
       "targets": [
         {
-          "expr": "count_over_time({app=\"mlops-app\"} |= \"Drift detected\" [1m])",
-          "refId": "A"
+          "expr": "sum(rate(inference_errors_total[1m]))",
+          "legendFormat": "errors"
         }
       ],
-      "title": "Drift Alerts (per minute)",
-      "type": "graph"
+      "id": 3
+    },
+    {
+      "type": "stat",
+      "title": "Drift events (flag)",
+      "targets": [
+        {
+          "expr": "sum(inference_model_info)",
+          "legendFormat": "model_flag"
+        }
+      ],
+      "id": 4
     }
   ],
-  "refresh": "5s",
   "schemaVersion": 36,
-  "style": "dark",
-  "tags": [],
-  "templating": { "list": [] },
-  "time": { "from": "now-1h", "to": "now" },
-  "timepicker": {},
-  "timezone": "",
-  "title": "AIOps Quality Project Dashboard",
-  "uid": "aiops_dashboard",
   "version": 1
 }

@@ -1,37 +1,44 @@
-import numpy as np
+import os
+import mlflow
+import mlflow.sklearn
 import pandas as pd
 from sklearn.datasets import load_iris
-from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
-from alibi_detect.cd import TabularDrift
-import joblib
-import os
+from sklearn.ensemble import RandomForestClassifier
 
-print("Starting model and drift detector training...")
+# --------- ENV ---------
+MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow.application.svc.cluster.local:5000")
+REGISTERED_MODEL_NAME = os.getenv("REGISTERED_MODEL_NAME", "iris_rf_model")
+EXPERIMENT_NAME = os.getenv("EXPERIMENT_NAME", "iris_rf_experiment")
 
-# 1. Завантаження та підготовка даних
-iris = load_iris()
-X, y = iris.data, iris.target
-feature_names = iris.feature_names
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.5, random_state=42)
+mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+mlflow.set_experiment(EXPERIMENT_NAME)
 
-# 2. Тренування моделі
-model = LogisticRegression(max_iter=200)
-model.fit(X_train, y_train)
-print("Model trained.")
+def main():
+    X, y = load_iris(return_X_y=True)
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-# 3. Тренування детектора дрейфу (використовуємо X_train як референтні дані)
-# p_val (поріг) = 0.05. Якщо p-value < 0.05, ми вважаємо, що відбувся дрейф.
-drift_detector = TabularDrift(X_train, p_val=.05)
-print("Drift detector trained.")
+    clf = RandomForestClassifier(n_estimators=int(os.getenv("N_ESTIMATORS", "200")),
+                                 max_depth=int(os.getenv("MAX_DEPTH", "5")),
+                                 random_state=42)
+    with mlflow.start_run() as run:
+        clf.fit(X_train, y_train)
 
-# 4. Збереження артефактів у папку 'app/'
-# Це важливо, оскільки app/Dockerfile буде копіювати вміст папки 'app/'
-output_dir = "aiops-quality-project/app"
-os.makedirs(output_dir, exist_ok=True)
+        train_acc = clf.score(X_train, y_train)
+        test_acc = clf.score(X_test, y_test)
 
-joblib.dump(model, os.path.join(output_dir, "model.pkl"))
-joblib.dump(drift_detector, os.path.join(output_dir, "drift_detector.pkl"))
+        mlflow.log_param("n_estimators", clf.n_estimators)
+        mlflow.log_param("max_depth", clf.max_depth)
+        mlflow.log_metric("train_accuracy", train_acc)
+        mlflow.log_metric("test_accuracy", test_acc)
 
-print(f"Artifacts saved to '{output_dir}' directory.")
-print("Training script finished.")
+        mlflow.sklearn.log_model(
+            sk_model=clf,
+            artifact_path="model",
+            registered_model_name=REGISTERED_MODEL_NAME
+        )
+
+        print(f"✔ Registered {REGISTERED_MODEL_NAME}. Run ID: {run.info.run_id}; test_acc={test_acc:.4f}")
+
+if __name__ == "__main__":
+    main()

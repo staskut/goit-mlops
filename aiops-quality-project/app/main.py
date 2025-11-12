@@ -1,136 +1,101 @@
 import os
-import joblib
-import logging
-import requests
-import numpy as np
-from fastapi import FastAPI, Request, BackgroundTasks
+import json
+import time
+import mlflow.pyfunc
+import pandas as pd
+from fastapi import FastAPI, Request, HTTPException
 from pydantic import BaseModel
-from typing import List
-from pythonjsonlogger import jsonlogger
-from prometheus_fastapi_instrumentator import Instrumentator
+from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
+from prometheus_client import CollectorRegistry
+from starlette.responses import Response
 
-# --- Конфігурація логування ---
-# Налаштовуємо JSON логер, щоб Loki міг легко парсити логи
-logger = logging.getLogger("aiops-logger")
-logger.setLevel(logging.INFO)
-logHandler = logging.StreamHandler()
-formatter = jsonlogger.JsonFormatter(
-    fmt='%(asctime)s %(levelname)s %(name)s %(message)s'
-)
-logHandler.setFormatter(formatter)
-logger.addHandler(logHandler)
+# --------- ENV ---------
+MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow.application.svc.cluster.local:5000")
+MODEL_NAME = os.getenv("MODEL_NAME", "iris_rf_model")
+MODEL_STAGE = os.getenv("MODEL_STAGE", "Production")
+DRIFT_ENABLED = os.getenv("DRIFT_ENABLED", "false").lower() == "true"
 
-# --- Завантаження артефактів ---
-# Завантажуємо модель та детектор дрейфу при старті
-try:
-    MODEL_PATH = os.getenv("MODEL_PATH", "app/model.pkl")
-    DRIFT_DETECTOR_PATH = os.getenv("DRIFT_DETECTOR_PATH", "app/drift_detector.pkl")
+# --------- MLflow Model Load ---------
+os.environ["MLFLOW_TRACKING_URI"] = MLFLOW_TRACKING_URI
+MODEL_URI = f"models:/{MODEL_NAME}/{MODEL_STAGE}"
+model = mlflow.pyfunc.load_model(model_uri=MODEL_URI)
 
-    model = joblib.load(MODEL_PATH)
-    drift_detector = joblib.load(DRIFT_DETECTOR_PATH)
+# --------- Metrics ---------
+registry = CollectorRegistry()
+REQUESTS = Counter("inference_requests_total", "Total inference requests", ["endpoint"], registry=registry)
+ERRORS = Counter("inference_errors_total", "Total inference errors", ["endpoint", "type"], registry=registry)
+LATENCY = Histogram("inference_latency_seconds", "Inference latency seconds", ["endpoint"], registry=registry)
+MODEL_INFO = Gauge("inference_model_info", "Model info as labels", ["name", "stage"], registry=registry)
+MODEL_INFO.labels(name=MODEL_NAME, stage=MODEL_STAGE).set(1)
 
-    logger.info("Model and drift detector loaded successfully.")
-except FileNotFoundError:
-    logger.error("Model or drift detector file not found. Make sure paths are correct.")
-    # У реальному світі тут можна було б завершити роботу, але для демо ми продовжимо
-    model, drift_detector = None, None
-
-# --- Отримання URL для Webhook з оточення ---
-# Цей URL буде викликатися при виявленні дрейфу
-GITHUB_WEBHOOK_URL = os.getenv("GITHUB_WEBHOOK_URL")
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")  # Потрібен для автентифікації dispatch
-
-# --- Ініціалізація FastAPI ---
-app = FastAPI()
-
-# Додаємо Prometheus метрики (будуть доступні на /metrics)
-Instrumentator().instrument(app).expose(app)
-
-
-class PredictionRequest(BaseModel):
-    # Очікуємо 4 фічі, як в Iris dataset
-    features: List[List[float]]
-
-
-class PredictionResponse(BaseModel):
-    prediction: List[int]
-    is_drift: int
-
-
-# --- Функція для виклику Webhook ---
-def trigger_retrain_webhook(payload: dict):
+# --------- Drift (stub) ---------
+def detect_drift(df: pd.DataFrame) -> bool:
     """
-    Асинхронно викликає GitHub Actions webhook (repository_dispatch).
+    Проста заглушка: перевірка діапазонів/NaN як приклад.
+    Замінити на реальний GE/Alibi Detect при потребі.
     """
-    if not GITHUB_WEBHOOK_URL or not GITHUB_TOKEN:
-        logger.warning("GITHUB_WEBHOOK_URL or GITHUB_TOKEN is not set. Skipping retrain trigger.")
-        return
+    if not DRIFT_ENABLED:
+        return False
+    if df.isna().any().any():
+        return True
+    # легкий sanity-check: велике відхилення значень
+    desc = df.describe().to_dict()
+    for _, stats in desc.items():
+        if stats.get("std", 0) == 0:
+            continue
+        # якщо std >> mean — сигнал
+        mean = abs(stats.get("mean", 0)) or 1e-9
+        if stats.get("std", 0) / mean > 50:
+            return True
+    return False
 
-    headers = {
-        "Accept": "application/vnd.github.v3+json",
-        "Authorization": f"token {GITHUB_TOKEN}"
-    }
-    # "event_type" має збігатися з тим, що вказано у workflow_dispatch
-    data = {"event_type": "drift_detected"}
+# --------- FastAPI ---------
+app = FastAPI(title="Inference API", version="1.0.0")
 
+class PredictRequest(BaseModel):
+    # очікуємо {"instances": [[...], [...]]} або {"instances": {...}} для табличних фіч
+    instances: list
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "model": MODEL_NAME, "stage": MODEL_STAGE}
+
+@app.get("/metrics")
+def metrics():
+    data = generate_latest(registry)
+    return Response(content=data, media_type=CONTENT_TYPE_LATEST)
+
+@app.post("/predict")
+async def predict(req: PredictRequest):
+    REQUESTS.labels(endpoint="/predict").inc()
+    start = time.time()
     try:
-        response = requests.post(GITHUB_WEBHOOK_URL, json=data, headers=headers)
-        response.raise_for_status()  # Викличе помилку, якщо статус не 2xx
-        logger.info(f"Successfully triggered retrain webhook. Status: {response.status_code}")
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Failed to trigger retrain webhook: {e}")
+        # нормалізація входу до DataFrame
+        X = req.instances
+        if isinstance(X, dict):
+            df = pd.DataFrame([X])
+        else:
+            # якщо масив масивів — зробимо DataFrame без колонок
+            df = pd.DataFrame(X)
+        drift = detect_drift(df)
 
+        preds = model.predict(df)
+        payload = {"predictions": _to_serializable(preds), "drift_detected": drift}
+        return payload
+    except HTTPException:
+        ERRORS.labels(endpoint="/predict", type="http").inc()
+        raise
+    except Exception as e:
+        ERRORS.labels(endpoint="/predict", type="exception").inc()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        LATENCY.labels(endpoint="/predict").observe(time.time() - start)
 
-# --- Основна логіка ---
-def predict_and_detect_drift(data: np.ndarray) -> (np.ndarray, int):
-    """
-    Робить передбачення та перевіряє на дрейф.
-    Повертає (передбачення, прапор_дрейфу).
-    """
-    if model is None or drift_detector is None:
-        logger.error("Model or drift detector not loaded.")
-        return [], -1
-
-    # 1. Передбачення
-    predictions = model.predict(data)
-
-    # 2. Перевірка на дрейф
-    # predict() детектора повертає dict з p-value та is_drift
-    drift_result = drift_detector.predict(data, return_p_val=True)
-    is_drift = drift_result['data']['is_drift']
-
-    return predictions, is_drift
-
-
-# --- Ендпоінти API ---
-
-@app.get("/")
-def read_root():
-    return {"status": "AIOps Quality Project API is running"}
-
-
-@app.post("/predict", response_model=PredictionResponse)
-async def predict(request: PredictionRequest, background_tasks: BackgroundTasks):
-    input_data = np.array(request.features)
-
-    # 1. Логуємо вхідні дані (Loki їх підбере)
-    logger.info("Received prediction request", extra={"input_features": request.features})
-
-    # 2. Робимо передбачення та детекцію дрейфу
-    predictions, is_drift = predict_and_detect_drift(input_data)
-
-    # 3. Якщо дрейф виявлено - логуємо та запускаємо webhook у фоні
-    if is_drift == 1:
-        logger.warning("Drift detected!", extra={"input_features": request.features})
-        # Додаємо виклик webhook у фонове завдання, щоб не блокувати відповідь
-        background_tasks.add_task(trigger_retrain_webhook, payload={"features": request.features})
-
-    response_data = {
-        "prediction": predictions.tolist(),
-        "is_drift": is_drift
-    }
-
-    # 4. Логуємо відповідь
-    logger.info("Sending prediction response", extra=response_data)
-
-    return response_data
+def _to_serializable(x):
+    try:
+        if hasattr(x, "tolist"):
+            return x.tolist()
+        json.dumps(x)  # перевірка серіалізації
+        return x
+    except Exception:
+        return str(x)
